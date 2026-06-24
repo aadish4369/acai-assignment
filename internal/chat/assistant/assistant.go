@@ -87,12 +87,17 @@ func (a *Assistant) Reply(ctx context.Context, conv *model.Conversation) (string
 			Tools: []openai.ChatCompletionToolUnionParam{
 				openai.ChatCompletionFunctionTool(openai.FunctionDefinitionParam{
 					Name:        "get_weather",
-					Description: openai.String("Get weather at the given location"),
+					Description: openai.String("Get the current weather, and optionally a multi-day forecast, for a location."),
 					Parameters: openai.FunctionParameters{
 						"type": "object",
 						"properties": map[string]any{
 							"location": map[string]string{
-								"type": "string",
+								"type":        "string",
+								"description": "City name, postal code, or coordinates to look up.",
+							},
+							"forecast_days": map[string]any{
+								"type":        "integer",
+								"description": "Number of days of forecast to include (1-7). Omit or set to 0 for current weather only.",
 							},
 						},
 						"required": []string{"location"},
@@ -142,7 +147,31 @@ func (a *Assistant) Reply(ctx context.Context, conv *model.Conversation) (string
 
 				switch call.Function.Name {
 				case "get_weather":
-					msgs = append(msgs, openai.ToolMessage("weather is fine", call.ID))
+					var payload struct {
+						Location     string `json:"location"`
+						ForecastDays int    `json:"forecast_days"`
+					}
+
+					if err := json.Unmarshal([]byte(call.Function.Arguments), &payload); err != nil {
+						msgs = append(msgs, openai.ToolMessage("failed to parse tool call arguments: "+err.Error(), call.ID))
+						break
+					}
+
+					var (
+						weather string
+						err     error
+					)
+					if payload.ForecastDays > 0 {
+						weather, err = ForecastWeather(ctx, payload.Location, payload.ForecastDays)
+					} else {
+						weather, err = CurrentWeather(ctx, payload.Location)
+					}
+					if err != nil {
+						msgs = append(msgs, openai.ToolMessage("failed to get weather: "+err.Error(), call.ID))
+						break
+					}
+
+					msgs = append(msgs, openai.ToolMessage(weather, call.ID))
 				case "get_today_date":
 					msgs = append(msgs, openai.ToolMessage(time.Now().Format(time.RFC3339), call.ID))
 				case "get_holidays":
