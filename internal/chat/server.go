@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/acai-travel/tech-challenge/internal/chat/model"
@@ -47,18 +48,34 @@ func (s *Server) StartConversation(ctx context.Context, req *pb.StartConversatio
 		return nil, twirp.RequiredArgumentError("message")
 	}
 
-	// choose a title
-	title, err := s.assist.Title(ctx, conversation)
-	if err != nil {
-		slog.ErrorContext(ctx, "Failed to generate conversation title", "error", err)
+	// generate title and reply in parallel; neither depends on the other for a new conversation
+	var (
+		title    string
+		reply    string
+		titleErr error
+		replyErr error
+		wg       sync.WaitGroup
+	)
+
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		title, titleErr = s.assist.Title(ctx, conversation)
+	}()
+	go func() {
+		defer wg.Done()
+		reply, replyErr = s.assist.Reply(ctx, conversation)
+	}()
+	wg.Wait()
+
+	if titleErr != nil {
+		slog.ErrorContext(ctx, "Failed to generate conversation title", "error", titleErr)
 	} else {
 		conversation.Title = title
 	}
 
-	// generate a reply
-	reply, err := s.assist.Reply(ctx, conversation)
-	if err != nil {
-		return nil, err
+	if replyErr != nil {
+		return nil, twirp.InternalErrorWith(replyErr)
 	}
 
 	conversation.Messages = append(conversation.Messages, &model.Message{
