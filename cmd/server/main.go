@@ -12,10 +12,13 @@ import (
 	"github.com/acai-travel/tech-challenge/internal/mongox"
 	"github.com/acai-travel/tech-challenge/internal/pb"
 	"github.com/gorilla/mux"
+	"github.com/joho/godotenv"
 	"github.com/twitchtv/twirp"
 )
 
 func main() {
+	_ = godotenv.Load()
+
 	mongo := mongox.MustConnect()
 
 	repo := model.New(mongo)
