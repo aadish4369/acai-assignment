@@ -14,6 +14,12 @@ func (w *statusAwareResponseWriter) WriteHeader(status int) {
 	w.status = status
 	w.ResponseWriter.WriteHeader(status)
 }
+func (w *statusAwareResponseWriter) statusOrDefault() int {
+	if w.status == 0 {
+		return http.StatusOK
+	}
+	return w.status
+}
 
 func Logger() func(handler http.Handler) http.Handler {
 	return func(handler http.Handler) http.Handler {
