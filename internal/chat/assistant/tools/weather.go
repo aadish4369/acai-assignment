@@ -1,4 +1,4 @@
-package assistant
+package tools
 
 import (
 	"context"
@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/acai-travel/tech-challenge/internal/chat/model"
+	"github.com/openai/openai-go/v2"
 )
 
 const (
@@ -20,9 +21,48 @@ const (
 
 var weatherClient = &http.Client{Timeout: 10 * time.Second}
 
-// CurrentWeather returns a human-readable summary of the current weather at the
-// given location, suitable for passing back to the model as tool output.
-func CurrentWeather(ctx context.Context, location string) (string, error) {
+type WeatherTool struct{}
+
+type weatherArgs struct {
+	Location     string `json:"location"`
+	ForecastDays int    `json:"forecast_days"`
+}
+
+func (WeatherTool) Definition() openai.ChatCompletionToolUnionParam {
+	return openai.ChatCompletionFunctionTool(openai.FunctionDefinitionParam{
+		Name:        "get_weather",
+		Description: openai.String("Get the current weather, and optionally a multi-day forecast, for a location."),
+		Parameters: openai.FunctionParameters{
+			"type": "object",
+			"properties": map[string]any{
+				"location": map[string]string{
+					"type":        "string",
+					"description": "City name, postal code, or coordinates to look up.",
+				},
+				"forecast_days": map[string]any{
+					"type":        "integer",
+					"description": "Number of days of forecast to include (1-7). Omit or set to 0 for current weather only.",
+				},
+			},
+			"required": []string{"location"},
+		},
+	})
+}
+
+func (WeatherTool) Execute(ctx context.Context, args json.RawMessage) (string, error) {
+	var payload weatherArgs
+	if err := json.Unmarshal(args, &payload); err != nil {
+		return "", fmt.Errorf("parse arguments: %w", err)
+	}
+
+	if payload.ForecastDays > 0 {
+		return forecastWeather(ctx, payload.Location, payload.ForecastDays)
+	}
+
+	return currentWeather(ctx, payload.Location)
+}
+
+func currentWeather(ctx context.Context, location string) (string, error) {
 	data, err := requestWeather(ctx, "current.json", location, nil)
 	if err != nil {
 		return "", err
@@ -31,10 +71,7 @@ func CurrentWeather(ctx context.Context, location string) (string, error) {
 	return formatCurrent(data), nil
 }
 
-// ForecastWeather returns a human-readable summary of the current weather plus a
-// multi-day forecast for the given location. days is clamped to the range
-// supported by the free WeatherAPI plan (1-7).
-func ForecastWeather(ctx context.Context, location string, days int) (string, error) {
+func forecastWeather(ctx context.Context, location string, days int) (string, error) {
 	if days < 1 {
 		days = 1
 	}
